@@ -1,58 +1,106 @@
 Using GraphQL
 =============
 
-.. note:: Hiku is a general-purpose library to expose information as a graph. And
-  initially, GraphQL support was not a primary concern. Hiku is an attempt to explore
-  alternative ways without the need to conform to the GraphQL spec and implement all
-  those features. So now, after several releases, it is possible to grow GraphQL
-  support and keep it optional.
+.. note:: Hiku is a general-purpose library to expose data as a graph of linked
+  nodes. And it is possible to implement GraphQL server using Hiku. But it is
+  wrong to say that Hiku is an implementation of GraphQL specification.
 
-In order to parse GraphQL queries you will need to install ``graphql-core``
-library:
+To implement GraphQL server we will have to:
 
-.. code-block:: shell
+  - add GraphQL introspection into our graph definition
+  - read GraphQL query
+  - validate query against graph definition
+  - execute query using Engine
+  - denormalize result into simple data structure
+  - serialize result and send back to the client
 
-  $ pip install graphql-core
 
-**Currently not supported features**
+Graphs definition
+~~~~~~~~~~~~~~~~~
 
-- mutations and other non-query operations
-- field aliases
+In GraphQL several root operation types
 
-Reading GraphQL queries
-~~~~~~~~~~~~~~~~~~~~~~~
-
-Minimal graph definition:
-
-.. literalinclude:: test_graphql.py
-  :lines: 11-25
-
-GraphQL query execution:
-
-.. literalinclude:: test_graphql.py
-  :lines: 31-34
-  :dedent: 4
 
 Introspection
 ~~~~~~~~~~~~~
 
-Hiku's graph by default doesn't contain a built-in introspection,
-but it can be added.
+.. automodule:: hiku.introspection.graphql
+  :members: GraphQLIntrospection, AsyncGraphQLIntrospection
 
-.. note:: Hiku types are optional and are not fully compatible with GraphQL type
-  system. For example, if the field contains :py:class:`~hiku.types.Any` or
-  :py:class:`~hiku.types.Record` types, such fields will be ignored. You still
-  will be able to query such fields, but they wouldn't be available for
-  introspection.
+Incompatible with GraphQL types are represented as :py:class:`hiku.types.Any`
+type.
 
-For synchronous graphs:
+Record data types are represented as interfaces and input objects with
+distinct prefixes. Given these data types:
 
-.. literalinclude:: test_graphql.py
-  :lines: 40-48
-  :dedent: 4
+.. code-block:: python
 
-For asynchronous graphs:
+  graph = Graph([...], data_types={'Foo': Record[{'x': Integer}]})
 
-.. literalinclude:: test_graphql.py
-  :lines: 59-67
-  :dedent: 4
+You will see ``Foo`` data type as:
+
+.. code-block:: javascript
+
+  interface IFoo {
+    x: Integer
+  }
+
+  input IOFoo {
+    x: Integer
+  }
+
+This is because Hiku's data types universally can be used in fields and
+options definition.
+
+Read query
+~~~~~~~~~~
+
+There are two options:
+
+  - read simple queries, when only query operations are expected
+  - read operations, when different operations are expected: queries, mutations,
+    etc.
+
+.. automodule:: hiku.readers.graphql
+    :members: read, read_operation, Operation, OperationType
+
+Validate query
+~~~~~~~~~~~~~~
+
+As every other query, GraphQL queries should be validated and errors can be
+sent back to the client:
+
+.. code-block:: python
+
+  from hiku.validate.query import validate
+
+  def handler(request):
+      ...  # read
+      errors = validate(graph, query)
+      if errors:
+          return {'errors': [{'message': e} for e in errors]}
+      ...  # execute
+
+Query execution
+~~~~~~~~~~~~~~~
+
+Depending on operation type,
+
+
+Denormalize result
+~~~~~~~~~~~~~~~~~~
+
+Most common serialization format for GraphQL is JSON. But in order to serialize
+execution result into JSON, it should be denormalized, to replace references
+(possibly cyclic) with actual data:
+
+.. code-block:: python
+
+  from hiku.result import denormalize
+
+  def handler(request):
+      ... # execute
+      result = denormalize(graph, result)
+      return response.json(result)
+
+.. _graphql-core: https://github.com/graphql-python/graphql-core
